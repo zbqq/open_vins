@@ -1,8 +1,13 @@
-#ifndef OV_CORE_TRACK_DESC_H
-#define OV_CORE_TRACK_DESC_H
+#ifndef OV_CORE_TRACK_DESC_GPU_H
+#define OV_CORE_TRACK_DESC_GPU_H
 
 
 #include <opencv2/xfeatures2d.hpp>
+#include <opencv2/core/cuda.hpp>
+#include <opencv2/cudaoptflow.hpp>
+#include <opencv2/cudaimgproc.hpp>
+#include <opencv2/cudaarithm.hpp>
+#include <opencv2/cudafeatures2d.hpp>
 
 #include "TrackBase.h"
 
@@ -14,7 +19,7 @@
  * We track both temporally, and across stereo pairs to get stereo contraints.
  * Right now we use ORB descriptors as we have found it is the fastest when computing descriptors.
  */
-class TrackDescriptor : public TrackBase
+class TrackDescriptor_GPU : public TrackBase
 {
 
 public:
@@ -25,10 +30,17 @@ public:
      * @param camera_d  map of camera_id => 4x1 camera distortion parameters
      * @param camera_fisheye map of camera_id => bool if we should do radtan or fisheye distortion model
      */
-    TrackDescriptor(std::map<size_t,Eigen::Matrix3d> camera_k,
-                    std::map<size_t,Eigen::Matrix<double,4,1>> camera_d,
-                    std::map<size_t,bool> camera_fisheye):
-            TrackBase(camera_k,camera_d,camera_fisheye),threshold(10),grid_x(8),grid_y(5),knn_ratio(0.75) {}
+    TrackDescriptor_GPU(std::map<size_t,Eigen::Matrix3d> camera_k,
+                        std::map<size_t,Eigen::Matrix<double,4,1>> camera_d,
+                        std::map<size_t,bool> camera_fisheye):
+            TrackBase(camera_k,camera_d,camera_fisheye),threshold(10),grid_x(8),grid_y(5),knn_ratio(0.75) {
+        // Extract our features and their descriptors
+        // NOTE: seems that you need to set parameters using the contructor
+        // NOTE: the set functions do not seem to work with this cuda version
+        detector = cv::cuda::ORB::create(num_features);
+        //detector->setMaxFeatures(num_features);
+        //detector->setFastThreshold(threshold);
+    }
 
     /**
      * @brief Public constructor with configuration variables
@@ -42,11 +54,18 @@ public:
      * @param gridy size of grid in the y-direction / v-direction
      * @param knnratio matching ratio needed (smaller value forces top two descriptors during match to be more different)
      */
-    explicit TrackDescriptor(std::map<size_t,Eigen::Matrix3d> camera_k,
-                             std::map<size_t,Eigen::Matrix<double,4,1>> camera_d,
-                             std::map<size_t,bool> camera_fisheye,
-                             int numfeats, int numaruco, int fast_threshold, int gridx, int gridy, double knnratio):
-            TrackBase(camera_k,camera_d,camera_fisheye,numfeats,numaruco),threshold(fast_threshold),grid_x(gridx),grid_y(gridy),knn_ratio(knnratio) {}
+    explicit TrackDescriptor_GPU(std::map<size_t,Eigen::Matrix3d> camera_k,
+                                std::map<size_t,Eigen::Matrix<double,4,1>> camera_d,
+                                std::map<size_t,bool> camera_fisheye,
+                                int numfeats, int numaruco, int fast_threshold, int gridx, int gridy, double knnratio):
+            TrackBase(camera_k,camera_d,camera_fisheye,numfeats,numaruco),threshold(fast_threshold),grid_x(gridx),grid_y(gridy),knn_ratio(knnratio) {
+        // Extract our features and their descriptors
+        // NOTE: seems that you need to set parameters using the contructor
+        // NOTE: the set functions do not seem to work with this cuda version
+        detector = cv::cuda::ORB::create(num_features);
+        //detector->setMaxFeatures(num_features);
+        //detector->setFastThreshold(threshold);
+    }
 
     /**
      * @brief Process a new monocular image
@@ -81,7 +100,7 @@ protected:
      * Our vector of IDs will be later overwritten when we match features temporally to the previous frame's features.
      * See robust_match() for the matching.
      */
-    void perform_detection_monocular(const cv::Mat& img0, std::vector<cv::KeyPoint>& pts0, cv::Mat& desc0, std::vector<size_t>& ids0);
+    void perform_detection_monocular(const cv::cuda::GpuMat &img0, std::vector<cv::KeyPoint>& pts0, cv::cuda::GpuMat &d_desc0, std::vector<size_t>& ids0);
 
     /**
      * @brief Detects new features in the current stereo pair
@@ -99,8 +118,8 @@ protected:
      * Our vector of IDs will be later overwritten when we match features temporally to the previous frame's features.
      * See robust_match() for the matching.
      */
-    void perform_detection_stereo(const cv::Mat& img0, const cv::Mat& img1, std::vector<cv::KeyPoint> &pts0, std::vector<cv::KeyPoint> &pts1,
-                                  cv::Mat& desc0, cv::Mat& desc1, std::vector<size_t> &ids0, std::vector<size_t> &ids1);
+    //void perform_detection_stereo(const cv::Mat& img0, const cv::Mat& img1, std::vector<cv::KeyPoint> &pts0, std::vector<cv::KeyPoint> &pts1,
+    //                              cv::Mat& desc0, cv::Mat& desc1, std::vector<size_t> &ids0, std::vector<size_t> &ids1);
 
     /**
      * @brief Find matches between two keypoint+descriptor sets.
@@ -116,7 +135,7 @@ protected:
      * https://github.com/opencv/opencv/blob/master/samples/cpp/tutorial_code/calib3d/real_time_pose_estimation/src/RobustMatcher.cpp
      */
     void robust_match(std::vector<cv::KeyPoint>& pts0, std::vector<cv::KeyPoint> pts1,
-                      cv::Mat& desc0, cv::Mat& desc1, std::vector<cv::DMatch>& matches);
+                      cv::cuda::GpuMat& d_desc0, cv::cuda::GpuMat& d_desc1, std::vector<cv::DMatch>& matches);
 
     // Helper functions for the robust_match function
     // Original code is from the "RobustMatcher" in the opencv examples
@@ -125,16 +144,10 @@ protected:
     void robust_symmetry_test(std::vector<std::vector<cv::DMatch> >& matches1, std::vector<std::vector<cv::DMatch> >& matches2, std::vector<cv::DMatch>& good_matches);
 
     // Timing variables
-    boost::posix_time::ptime rT1, rT2, rT3, rT4, rT5, rT6, rT7;
+    boost::posix_time::ptime rT0, rT1, rT2, rT3, rT4, rT5, rT6, rT7;
 
-    // Our orb extractor
-    cv::Ptr<cv::ORB> orb0 = cv::ORB::create();
-    cv::Ptr<cv::ORB> orb1 = cv::ORB::create();
-    cv::Ptr<cv::xfeatures2d::FREAK> freak0 = cv::xfeatures2d::FREAK::create();
-    cv::Ptr<cv::xfeatures2d::FREAK> freak1 = cv::xfeatures2d::FREAK::create();
-
-    // Our descriptor matcher
-    cv::Ptr<cv::DescriptorMatcher> matcher = cv::DescriptorMatcher::create("BruteForce-Hamming");
+    // ORB extractor used to get our features and descriptors
+    cv::Ptr<cv::cuda::ORB> detector;
 
     // Parameters for our FAST grid detector
     int threshold;
@@ -145,12 +158,12 @@ protected:
     // then the two features are too close, so should be considered ambiguous/bad match
     double knn_ratio;
 
-    // Descriptor matrices
-    std::map<size_t,cv::Mat> desc_last;
+    // Last set of cuda matrices that are on the current device
+    std::map<size_t,cv::cuda::GpuMat> d_desc_last;
 
 
 };
 
 
 
-#endif /* OV_CORE_TRACK_DESC_H */
+#endif /* OV_CORE_TRACK_DESC_GPU_H */

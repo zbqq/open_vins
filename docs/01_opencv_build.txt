@@ -1,0 +1,33 @@
+
+
+We rely on OpenCV for a lot of our image processing and feature tracking.
+To use the CUDA frontend make sure you are building OpenCV from scratch.
+To build with OpenCV you can run the following:
+
+1. Clone the following
+    - git clone https://github.com/opencv/opencv
+    - git clone https://github.com/opencv/opencv_contrib
+2. Change to OpenCV 3 since that is what ROS uses
+    - cd opencv
+    - git checkout 3.4.6
+    - cd ../opencv_contrib/
+    - git checkout 3.4.6
+    - cd ..
+2. Run cmake
+    - cd opencv
+    - mkdir build
+    - cd build
+    - cmake -DOPENCV_EXTRA_MODULES_PATH=../../opencv_contrib/modules -DWITH_CUDA=ON ..
+3. Make sure you can see some of the "contrib" and cuda modules (xfeature2d and cudafeatures2d)
+4. Build and install
+    - make -j8
+    - sudo make install
+5. OpenCV should now be installed system wide!
+6. You will want to make sure your `/usr/local/cuda` points to the correct version that OpenCV built with
+
+
+
+
+
+
+

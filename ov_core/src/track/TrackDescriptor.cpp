@@ -7,6 +7,10 @@ void TrackDescriptor::feed_monocular(double timestamp, cv::Mat &img, size_t cam_
     // Start timing
     rT1 =  boost::posix_time::microsec_clock::local_time();
 
+
+    // Histogram equalize
+    cv::equalizeHist(img, img);
+
     // If we are the first frame (or have lost tracking), initialize our descriptors
     if(pts_last.find(cam_id)==pts_last.end() || pts_last[cam_id].empty()) {
         perform_detection_monocular(img, pts_last[cam_id], desc_last[cam_id], ids_last[cam_id]);
@@ -114,6 +118,10 @@ void TrackDescriptor::feed_stereo(double timestamp, cv::Mat &img_left, cv::Mat &
 
     // Start timing
     rT1 =  boost::posix_time::microsec_clock::local_time();
+
+    // Histogram equalize
+    cv::equalizeHist(img_left, img_left);
+    cv::equalizeHist(img_right, img_right);
 
     // If we are the first frame (or have lost tracking), initialize our descriptors
     if(pts_last[cam_id_left].empty() || pts_last[cam_id_right].empty()) {
@@ -271,7 +279,10 @@ void TrackDescriptor::perform_detection_monocular(const cv::Mat& img0, std::vect
 
     // Extract our features (use FAST with griding)
     std::vector<cv::KeyPoint> pts0_ext;
-    Grider_FAST::perform_griding(img0, pts0_ext, num_features, grid_x, grid_y, threshold, true);
+    this->orb0->setMaxFeatures(num_features);
+    this->orb0->setFastThreshold(threshold);
+    this->orb0->detect(img0, pts0_ext);
+    //Grider_FAST::perform_griding(img0, pts0_ext, num_features, grid_x, grid_y, threshold, true);
 
     // For all new points, extract their descriptors
     cv::Mat desc0_ext;
@@ -289,9 +300,9 @@ void TrackDescriptor::perform_detection_monocular(const cv::Mat& img0, std::vect
 
 }
 
-void TrackDescriptor::perform_detection_stereo(const cv::Mat &img0, const cv::Mat &img1,
+void TrackDescriptor::perform_detection_stereo(const cv::Mat& img0, const cv::Mat& img1,
                                                std::vector<cv::KeyPoint> &pts0, std::vector<cv::KeyPoint> &pts1,
-                                               cv::Mat &desc0, cv::Mat &desc1,
+                                               cv::Mat& desc0, cv::Mat& desc1,
                                                std::vector<size_t> &ids0, std::vector<size_t> &ids1) {
 
     // Assert that we need features

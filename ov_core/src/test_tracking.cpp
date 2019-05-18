@@ -12,8 +12,8 @@
 #include <sensor_msgs/Image.h>
 #include <cv_bridge/cv_bridge.h>
 
-#include <opencv/cv.hpp>
 #include <opencv2/core/core.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
 #include <boost/filesystem.hpp>
@@ -22,6 +22,11 @@
 #include "track/TrackKLT.h"
 #include "track/TrackDescriptor.h"
 #include "track/TrackAruco.h"
+
+#ifdef HAVE_CUDA
+#include "track/TrackDescriptor_GPU.h"
+#include "track/TrackKLT_GPU.h"
+#endif
 
 // Our feature extractor
 TrackBase* extractor;
@@ -55,15 +60,15 @@ int main(int argc, char** argv)
 
     // Location of the ROS bag we want to read in
     std::string path_to_bag;
-    nh.param<std::string>("path_bag", path_to_bag, "/home/patrick/datasets/eth/V1_01_easy.bag");
+    nh.param<std::string>("path_bag", path_to_bag, "/media/patrick/4DE309DD7C67FB40/V1_01_easy.bag");
     //nh.param<std::string>("path_bag", path_to_bag, "/home/patrick/datasets/eth/V2_03_difficult.bag");
     ROS_INFO("ros bag path is: %s", path_to_bag.c_str());
 
     // Get our start location and how much of the bag we want to play
     // Make the bag duration < 0 to just process to the end of the bag
     double bag_start, bag_durr;
-    nh.param<double>("bag_start", bag_start, 2);
-    nh.param<double>("bag_durr", bag_durr, -1);
+    nh.param<double>("bag_start", bag_start, 15);
+    nh.param<double>("bag_durr", bag_durr, 20);
 
 
     //===================================================================================
@@ -75,7 +80,7 @@ int main(int argc, char** argv)
     int num_pts, num_aruco, fast_threshold, grid_x, grid_y, min_px_dist;
     double knn_ratio;
     bool do_downsizing;
-    nh.param<int>("num_pts", num_pts, 1000);
+    nh.param<int>("num_pts", num_pts, 1500);
     nh.param<int>("num_aruco", num_aruco, 1024);
     nh.param<int>("clone_states", clone_states, 10);
     nh.param<int>("fast_threshold", fast_threshold, 15);
@@ -109,9 +114,16 @@ int main(int argc, char** argv)
     camera_k.insert({1,cam0_k});
     camera_d.insert({1,cam0_d});
 
+    // Nice printing of cuda device information
+    #ifdef HAVE_CUDA
+    //cv::cuda::printShortCudaDeviceInfo(cv::cuda::getDevice());
+    #endif
+
     // Lets make a feature extractor
-    extractor = new TrackKLT(camera_k,camera_d,camera_fisheye,num_pts,num_aruco,fast_threshold,grid_x,grid_y,min_px_dist);
+    //extractor = new TrackKLT(camera_k,camera_d,camera_fisheye,num_pts,num_aruco,fast_threshold,grid_x,grid_y,min_px_dist);
+    //extractor = new TrackKLT_GPU(camera_k,camera_d,camera_fisheye,num_pts,num_aruco,fast_threshold,grid_x,grid_y,min_px_dist);
     //extractor = new TrackDescriptor(camera_k,camera_d,camera_fisheye,num_pts,num_aruco,fast_threshold,grid_x,grid_y,knn_ratio);
+    extractor = new TrackDescriptor_GPU(camera_k,camera_d,camera_fisheye,num_pts,num_aruco,fast_threshold,grid_x,grid_y,knn_ratio);
     //extractor = new TrackAruco(camera_k,camera_d,camera_fisheye,num_aruco,do_downsizing);
 
 
@@ -176,8 +188,8 @@ int main(int argc, char** argv)
             }
             // Save to our temp variable
             has_left = true;
-            cv::equalizeHist(cv_ptr->image, img0);
-            //img0 = cv_ptr->image.clone();
+            //cv::equalizeHist(cv_ptr->image, img0);
+            img0 = cv_ptr->image.clone();
             time0 = cv_ptr->header.stamp.toSec();
         }
 
@@ -194,8 +206,8 @@ int main(int argc, char** argv)
             }
             // Save to our temp variable
             has_right = true;
-            cv::equalizeHist(cv_ptr->image, img1);
-            //img1 = cv_ptr->image.clone();
+            //cv::equalizeHist(cv_ptr->image, img1);
+            img1 = cv_ptr->image.clone();
             time1 = cv_ptr->header.stamp.toSec();
         }
 
@@ -226,19 +238,19 @@ void handle_stereo(double time0, double time1, cv::Mat img0, cv::Mat img1) {
                     
 
     // Process this new image
-    extractor->feed_stereo(time0, img0, img1, 0, 1);
-    //extractor->feed_monocular(time0, img0, 2);
+    //extractor->feed_stereo(time0, img0, img1, 0, 1);
+    extractor->feed_monocular(time0, img0, 0);
 
 
-    // Display the resulting tracks
-    cv::Mat img_active, img_history;
-    extractor->display_active(img_active,255,0,0,0,0,255);
-    extractor->display_history(img_history,0,255,255,255,255,255);
-
-    // Show our image!
-    cv::imshow("Active Tracks", img_active);
-    cv::imshow("Track History", img_history);
-    cv::waitKey(1);
+//    // Display the resulting tracks
+//    cv::Mat img_active, img_history;
+//    extractor->display_active(img_active,255,0,0,0,0,255);
+//    extractor->display_history(img_history,0,255,255,255,255,255);
+//
+//    // Show our image!
+//    cv::imshow("Active Tracks", img_active);
+//    cv::imshow("Track History", img_history);
+//    cv::waitKey(1);
 
     // Get lost tracks
     FeatureDatabase* database = extractor->get_feature_database();

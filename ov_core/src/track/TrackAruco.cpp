@@ -6,6 +6,9 @@ void TrackAruco::feed_monocular(double timestamp, cv::Mat &img, size_t cam_id) {
     // Start timing
     rT1 =  boost::posix_time::microsec_clock::local_time();
 
+    // Histogram equalize
+    cv::equalizeHist(img, img);
+
     // Clear the old data from the last timestep
     ids_aruco[cam_id].clear();
     corners[cam_id].clear();
@@ -91,6 +94,10 @@ void TrackAruco::feed_stereo(double timestamp, cv::Mat &img_left, cv::Mat &img_r
 
     // Start timing
     rT1 =  boost::posix_time::microsec_clock::local_time();
+
+    // Histogram equalize
+    cv::equalizeHist(img_left, img_left);
+    cv::equalizeHist(img_right, img_right);
 
     // Clear the old data from the last timestep
     ids_aruco[cam_id_left].clear();
@@ -229,7 +236,7 @@ void TrackAruco::display_active(cv::Mat &img_out, int r1, int g1, int b1, int r2
     for(auto const& pair : img_last) {
         // select the subset of the image
         cv::Mat img_temp;
-        if(image_new) cv::cvtColor(img_last[pair.first], img_temp, CV_GRAY2RGB);
+        if(image_new) cv::cvtColor(img_last[pair.first], img_temp, cv::COLOR_GRAY2RGB);
         else img_temp = img_out(cv::Rect(max_width*ct,0,max_width,max_height));
         // draw...
         if(!ids_aruco[pair.first].empty()) cv::aruco::drawDetectedMarkers(img_temp, corners[pair.first], ids_aruco[pair.first]);

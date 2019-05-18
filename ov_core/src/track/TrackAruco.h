@@ -3,6 +3,7 @@
 
 
 #include <opencv2/aruco.hpp>
+#include <opencv2/imgproc.hpp>
 
 #include "TrackBase.h"
 

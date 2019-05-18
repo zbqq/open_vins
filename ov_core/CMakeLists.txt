@@ -9,15 +9,29 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/)
 # Find catkin (the ROS build system)
 find_package(catkin REQUIRED COMPONENTS roscpp rosbag tf std_msgs geometry_msgs sensor_msgs nav_msgs visualization_msgs cv_bridge)
 
+
+# Set the toolkit link to be the default path
+set(CUDA_TOOLKIT_ROOT_DIR "/usr/local/cuda")
+
 # Include libraries
 find_package(Eigen3 REQUIRED)
-find_package(OpenCV 3 REQUIRED)
+find_package(OpenCV 3.4.6 EXACT REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system filesystem thread date_time)
 
 # display message to user
 message(STATUS "EIGEN VERSION: " ${EIGEN3_VERSION})
 message(STATUS "OPENCV VERSION: " ${OpenCV_VERSION})
 message(STATUS "BOOST VERSION: " ${Boost_VERSION})
+
+# check if we have cuda avalible
+# https://stackoverflow.com/a/18395315/7718197
+find_package(CUDA ${OpenCV_CUDA_VERSION} QUIET)
+if((HAVE_CUDA OR CUDA_FOUND) AND OpenCV_CUDA_VERSION)
+    add_definitions(-DHAVE_CUDA=1)
+    message(STATUS "CUDA TOOLKIT VERSION: " ${CUDA_VERSION})
+    message(STATUS "CUDA OPENCV VERSION: " ${OpenCV_CUDA_VERSION})
+endif()
+
 
 # Describe catkin project
 catkin_package(
@@ -55,20 +69,34 @@ include_directories(
 # Set link libraries used by all binaries
 list(APPEND thirdparty_libraries
         ${Boost_LIBRARIES}
-        ${OpenCV_LIBRARIES}
         ${catkin_LIBRARIES}
+        ${OpenCV_LIBRARIES}
 )
 
 ##################################################
 # Make the core library
 ##################################################
+
+# Add cuda libraries as needed
+if((HAVE_CUDA OR CUDA_FOUND) AND OpenCV_CUDA_VERSION)
+    set(OV_CUDA_SOURCES
+        src/track/TrackDescriptor_GPU.cpp
+        src/track/TrackKLT_GPU.cpp
+    )
+endif()
+
+# Create the library
 add_library(ov_core
         src/track/TrackBase.cpp
         src/track/TrackAruco.cpp
         src/track/TrackDescriptor.cpp
         src/track/TrackKLT.cpp
+        ${OV_CUDA_SOURCES}
 )
 target_link_libraries(ov_core ${thirdparty_libraries})
+
+
+
 
 
 ##################################################

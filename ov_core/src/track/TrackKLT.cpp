@@ -6,6 +6,9 @@ void TrackKLT::feed_monocular(double timestamp, cv::Mat &img, size_t cam_id) {
     // Start timing
     rT1 =  boost::posix_time::microsec_clock::local_time();
 
+    // Histogram equalize
+    cv::equalizeHist(img, img);
+
     // If we didn't have any successful tracks last time, just extract this time
     // This also handles, the tracking initalization on the first call to this extractor
     if(pts_last[cam_id].empty()) {
@@ -94,6 +97,10 @@ void TrackKLT::feed_stereo(double timestamp, cv::Mat &img_left, cv::Mat &img_rig
 
     // Start timing
     rT1 =  boost::posix_time::microsec_clock::local_time();
+
+    // Histogram equalize
+    cv::equalizeHist(img_left, img_left);
+    cv::equalizeHist(img_right, img_right);
 
     // If we didn't have any successful tracks last time, just extract this time
     // This also handles, the tracking initalization on the first call to this extractor
