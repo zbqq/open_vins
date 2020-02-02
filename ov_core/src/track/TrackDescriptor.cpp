@@ -29,6 +29,9 @@ void TrackDescriptor::feed_monocular(double timestamp, cv::Mat &imgin, size_t ca
     // Start timing
     rT1 =  boost::posix_time::microsec_clock::local_time();
 
+    // Lock this data feed for this camera
+    std::unique_lock<std::mutex> lck(mtx_feeds.at(cam_id));
+
     // Histogram equalize
     cv::Mat img;
     cv::equalizeHist(imgin, img);
@@ -140,6 +143,10 @@ void TrackDescriptor::feed_stereo(double timestamp, cv::Mat &img_leftin, cv::Mat
 
     // Start timing
     rT1 =  boost::posix_time::microsec_clock::local_time();
+
+    // Lock this data feed for this camera
+    std::unique_lock<std::mutex> lck1(mtx_feeds.at(cam_id_left));
+    std::unique_lock<std::mutex> lck2(mtx_feeds.at(cam_id_right));
 
     // Histogram equalize
     cv::Mat img_left, img_right;
@@ -315,8 +322,8 @@ void TrackDescriptor::perform_detection_monocular(const cv::Mat& img0, std::vect
         pts0.push_back(pts0_ext.at(i));
         desc0.push_back(desc0_ext.row((int)i));
         // Set our IDs to be unique IDs here, will later replace with corrected ones, after temporal matching
-        currid++;
-        ids0.push_back(currid);
+        size_t temp = ++currid;
+        ids0.push_back(temp);
     }
 
 }
@@ -370,9 +377,9 @@ void TrackDescriptor::perform_detection_stereo(const cv::Mat &img0, const cv::Ma
         desc0.push_back(desc0_ext.row(index_pt0));
         desc1.push_back(desc1_ext.row(index_pt1));
         // Set our IDs to be unique IDs here, will later replace with corrected ones, after temporal matching
-        currid++;
-        ids0.push_back(currid);
-        ids1.push_back(currid);
+        size_t temp = ++currid;
+        ids0.push_back(temp);
+        ids1.push_back(temp);
     }
 
 }

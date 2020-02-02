@@ -38,7 +38,7 @@ Simulator::Simulator(ros::NodeHandle& nh) {
     ROS_INFO("=======================================");
 
     // Load the groundtruth trajectory and its spline
-    std::string path_traj = "/home/patrick/workspace/catkin_ws_ov/src/open_vins/ov_data/sim/udel_gore.txt";
+    std::string path_traj = "./src/open_vins/ov_data/sim/udel_gore.txt";
     nh.param<std::string>("sim_traj_path", path_traj, path_traj);
     load_data(path_traj);
     spline.feed_trajectory(traj_data);
@@ -63,6 +63,8 @@ Simulator::Simulator(ros::NodeHandle& nh) {
 
     // Find the timestamp that we move enough to be considered "moved"
     double distance = 0.0;
+    double distancethreshold = 0.0;
+    nh.param<double>("sim_distance_threshold", distancethreshold, 0.5);
     while(true) {
 
         // Get the pose at the current timestep
@@ -81,7 +83,6 @@ Simulator::Simulator(ros::NodeHandle& nh) {
         p_IinG_init = p_IinG;
 
         // Now check if we have an acceleration, else move forward in time
-        double distancethreshold = 0.10;
         if(distance > distancethreshold) {
             break;
         } else {
@@ -113,6 +114,7 @@ Simulator::Simulator(ros::NodeHandle& nh) {
 
     // Load number of cameras and number of points
     nh.param<int>("max_cameras", max_cameras, 1);
+    nh.param<bool>("use_stereo", use_stereo, true);
     nh.param<int>("num_pts", num_pts, 200);
 
     // Create generator for our camera
@@ -496,6 +498,12 @@ bool Simulator::get_next_cam(double &time_cam, std::vector<int> &camids, std::ve
         // If greater than only select the first set
         if((int)uvs.size() > num_pts) {
             uvs.erase(uvs.begin()+num_pts, uvs.end());
+        }
+
+        // Append the map size so all cameras have unique features in them (but the same map)
+        // Only do this if we are not enforcing stereo constraints between all our cameras
+        for (size_t f=0; f<uvs.size() && !use_stereo; f++){
+            uvs.at(f).first += i*featmap.size();
         }
 
         // Loop through and add noise to each uv measurement

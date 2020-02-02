@@ -29,6 +29,9 @@ void TrackAruco::feed_monocular(double timestamp, cv::Mat &imgin, size_t cam_id)
     // Start timing
     rT1 =  boost::posix_time::microsec_clock::local_time();
 
+    // Lock this data feed for this camera
+    std::unique_lock<std::mutex> lck(mtx_feeds.at(cam_id));
+
     // Histogram equalize
     cv::Mat img;
     cv::equalizeHist(imgin, img);
@@ -118,6 +121,10 @@ void TrackAruco::feed_stereo(double timestamp, cv::Mat &img_leftin, cv::Mat &img
 
     // Start timing
     rT1 =  boost::posix_time::microsec_clock::local_time();
+
+    // Lock this data feed for this camera
+    std::unique_lock<std::mutex> lck1(mtx_feeds.at(cam_id_left));
+    std::unique_lock<std::mutex> lck2(mtx_feeds.at(cam_id_right));
 
     // Histogram equalize
     cv::Mat img_left, img_right;
@@ -241,6 +248,12 @@ void TrackAruco::feed_stereo(double timestamp, cv::Mat &img_leftin, cv::Mat &img
 
 void TrackAruco::display_active(cv::Mat &img_out, int r1, int g1, int b1, int r2, int g2, int b2) {
 
+    // Lock all our feeds (this prevents other threads from editing our data)
+    //std::vector<std::unique_lock<std::mutex>> lcks;
+    //for(size_t i=0; i<mtx_feeds.size(); i++) {
+    //    lcks.push_back(std::unique_lock<std::mutex>(mtx_feeds.at(i)));
+    //}
+
     // Get the largest width and height
     int max_width = -1;
     int max_height = -1;
@@ -259,6 +272,8 @@ void TrackAruco::display_active(cv::Mat &img_out, int r1, int g1, int b1, int r2
     // Loop through each image, and draw
     int ct = 0;
     for(auto const& pair : img_last) {
+        // Lock this image
+        std::unique_lock<std::mutex> lck(mtx_feeds.at(pair.first));
         // select the subset of the image
         cv::Mat img_temp;
         if(image_new) cv::cvtColor(img_last[pair.first], img_temp, CV_GRAY2RGB);

@@ -25,20 +25,17 @@
 #include <vector>
 #include <unordered_map>
 
+#include "types/Type.h"
 #include "types/IMU.h"
 #include "types/Vec.h"
 #include "types/PoseJPL.h"
+#include "types/Landmark.h"
 #include "StateOptions.h"
 
 using namespace ov_core;
 
 
 namespace ov_msckf {
-
-
-    // Pre-declare the state since it depends on us also (i.e. a circular dependency)
-    class Landmark;
-
 
     /**
      * @brief State of our filter
@@ -142,7 +139,7 @@ namespace ov_msckf {
         }
 
         /// Access to all current clones in the state
-        std::unordered_map<double, PoseJPL*> get_clones() {
+        std::map<double, PoseJPL*> get_clones() {
             return _clones_IMU;
         }
 
@@ -197,7 +194,7 @@ namespace ov_msckf {
         IMU *_imu;
 
         /// Map between imaging times and clone poses (q_GtoIi, p_IiinG)
-        std::unordered_map<double, PoseJPL*> _clones_IMU;
+        std::map<double, PoseJPL*> _clones_IMU;
 
         /// Our current set of SLAM features (3d positions)
         std::unordered_map<size_t, Landmark*> _features_SLAM;
@@ -218,7 +215,7 @@ namespace ov_msckf {
         Eigen::MatrixXd _Cov;
 
         /// Vector of variables
-        std::vector<Type *> _variables;
+        std::vector<Type*> _variables;
 
 
     private:

@@ -34,6 +34,8 @@ RosVisualizer::RosVisualizer(ros::NodeHandle &nh, VioManager* app, Simulator *si
     // Setup pose and path publisher
     pub_poseimu = nh.advertise<geometry_msgs::PoseWithCovarianceStamped>("/ov_msckf/poseimu", 2);
     ROS_INFO("Publishing: %s", pub_poseimu.getTopic().c_str());
+    pub_odomimu = nh.advertise<nav_msgs::Odometry>("/ov_msckf/odomimu", 2);
+    ROS_INFO("Publishing: %s", pub_odomimu.getTopic().c_str());
     pub_pathimu = nh.advertise<nav_msgs::Path>("/ov_msckf/pathimu", 2);
     ROS_INFO("Publishing: %s", pub_pathimu.getTopic().c_str());
 
@@ -112,6 +114,12 @@ void RosVisualizer::visualize() {
     if(!_app->intialized())
         return;
 
+    // Save the start time of this dataset
+    if(!start_time_set) {
+        rT1 =  boost::posix_time::microsec_clock::local_time();
+        start_time_set = true;
+    }
+
     // publish state
     publish_state();
 
@@ -141,6 +149,18 @@ void RosVisualizer::visualize_final() {
         ROS_INFO("\033[0;95mRMSE average: %.3f (m) position\033[0m",summed_rmse_pos/summed_number);
     }
 
+    // Publish RMSE and NEES if doing simulation
+    if(_sim != nullptr) {
+        ROS_INFO("\033[0;95mRMSE average: %.3f (deg) orientation\033[0m",summed_rmse_ori/summed_number);
+        ROS_INFO("\033[0;95mRMSE average: %.3f (m) position\033[0m",summed_rmse_pos/summed_number);
+        ROS_INFO("\033[0;95mNEES average: %.3f (deg) orientation\033[0m",summed_nees_ori/summed_number);
+        ROS_INFO("\033[0;95mNEES average: %.3f (m) position\033[0m",summed_nees_pos/summed_number);
+    }
+
+    // Print the total time
+    rT2 =  boost::posix_time::microsec_clock::local_time();
+    ROS_INFO("\033[0;95mTIME: %.3f seconds\033[0m",(rT2-rT1).total_microseconds()*1e-6);
+
 }
 
 
@@ -167,13 +187,45 @@ void RosVisualizer::publish_state() {
     std::vector<Type*> statevars;
     statevars.push_back(state->imu()->pose()->p());
     statevars.push_back(state->imu()->pose()->q());
-    Eigen::Matrix<double,6,6> covariance = StateHelper::get_marginal_covariance(_app->get_state(),statevars);
+    Eigen::Matrix<double,6,6> covariance_posori = StateHelper::get_marginal_covariance(_app->get_state(),statevars);
     for(int r=0; r<6; r++) {
         for(int c=0; c<6; c++) {
-            poseIinM.pose.covariance[6*r+c] = covariance(r,c);
+            poseIinM.pose.covariance[6*r+c] = covariance_posori(r,c);
         }
     }
     pub_poseimu.publish(poseIinM);
+
+    //=========================================================
+    //=========================================================
+
+    // Our odometry message (note we do not fill out angular velocities)
+    nav_msgs::Odometry odomIinM;
+    odomIinM.header = poseIinM.header;
+    odomIinM.pose.pose = poseIinM.pose.pose;
+    odomIinM.pose.covariance = poseIinM.pose.covariance;
+    odomIinM.child_frame_id = "imu";
+    odomIinM.twist.twist.angular.x = 0; // we do not estimate this...
+    odomIinM.twist.twist.angular.y = 0; // we do not estimate this...
+    odomIinM.twist.twist.angular.z = 0; // we do not estimate this...
+    odomIinM.twist.twist.linear.x = state->imu()->vel()(0);
+    odomIinM.twist.twist.linear.y = state->imu()->vel()(1);
+    odomIinM.twist.twist.linear.z = state->imu()->vel()(2);
+
+    // Velocity covariance (linear then angular)
+    statevars.clear();
+    statevars.push_back(state->imu()->v());
+    Eigen::Matrix<double,6,6> covariance_linang = INFINITY*Eigen::Matrix<double,6,6>::Identity();
+    covariance_linang.block(0,0,3,3) = StateHelper::get_marginal_covariance(_app->get_state(),statevars);
+    for(int r=0; r<6; r++) {
+        for(int c=0; c<6; c++) {
+            odomIinM.twist.covariance[6*r+c] = (std::isnan(covariance_linang(r,c))) ? 0 : covariance_linang(r,c);
+        }
+    }
+    pub_odomimu.publish(odomIinM);
+
+
+    //=========================================================
+    //=========================================================
 
     // Append to our pose vector
     geometry_msgs::PoseStamped posetemp;
@@ -193,6 +245,8 @@ void RosVisualizer::publish_state() {
     poses_seq_imu++;
 
     // Publish our transform on TF
+    // NOTE: since we use JPL we have an implicit conversion to Hamilton when we publish
+    // NOTE: a rotation from GtoI in JPL has the same xyzw as a ItoG Hamilton rotation
     tf::StampedTransform trans;
     trans.stamp_ = ros::Time::now();
     trans.frame_id_ = "global";
@@ -206,16 +260,18 @@ void RosVisualizer::publish_state() {
     // Loop through each camera calibration and publish it
     for(const auto &calib : state->get_calib_IMUtoCAMs()) {
         // need to flip the transform to the IMU frame
-        Eigen::Vector4d q_CtoI = Inv(calib.second->quat());
-        Eigen::Vector3d p_IinC = -calib.second->Rot().transpose()*calib.second->pos();
-        // publish
+        Eigen::Vector4d q_ItoC = calib.second->quat();
+        Eigen::Vector3d p_CinI = -calib.second->Rot().transpose()*calib.second->pos();
+        // publish our transform on TF
+        // NOTE: since we use JPL we have an implicit conversion to Hamilton when we publish
+        // NOTE: a rotation from ItoC in JPL has the same xyzw as a CtoI Hamilton rotation
         tf::StampedTransform trans;
         trans.stamp_ = ros::Time::now();
         trans.frame_id_ = "imu";
         trans.child_frame_id_ = "cam"+std::to_string(calib.first);
-        tf::Quaternion quat(q_CtoI(0),q_CtoI(1),q_CtoI(2),q_CtoI(3));
+        tf::Quaternion quat(q_ItoC(0),q_ItoC(1),q_ItoC(2),q_ItoC(3));
         trans.setRotation(quat);
-        tf::Vector3 orig(p_IinC(0),p_IinC(1),p_IinC(2));
+        tf::Vector3 orig(p_CinI(0),p_CinI(1),p_CinI(2));
         trans.setOrigin(orig);
         mTfBr->sendTransform(trans);
     }
@@ -225,6 +281,10 @@ void RosVisualizer::publish_state() {
 
 
 void RosVisualizer::publish_images() {
+
+    // Check if we have subscribers
+    if(pub_tracks.getNumSubscribers()==0)
+        return;
 
     // Get our trackers
     TrackBase *trackFEATS = _app->get_track_feat();
@@ -252,6 +312,11 @@ void RosVisualizer::publish_images() {
 
 
 void RosVisualizer::publish_features() {
+
+    // Check if we have subscribers
+    if(pub_points_msckf.getNumSubscribers()==0 && pub_points_slam.getNumSubscribers()==0 &&
+       pub_points_aruco.getNumSubscribers()==0 && pub_points_sim.getNumSubscribers()==0)
+        return;
 
     // Get our good features
     std::vector<Eigen::Vector3d> feats_msckf = _app->get_good_features_MSCKF();

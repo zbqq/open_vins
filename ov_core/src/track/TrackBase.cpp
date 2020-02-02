@@ -26,6 +26,12 @@ using namespace ov_core;
 
 void TrackBase::display_active(cv::Mat &img_out, int r1, int g1, int b1, int r2, int g2, int b2) {
 
+    // Lock all our feeds (this prevents other threads from editing our data)
+    //std::vector<std::unique_lock<std::mutex>> lcks;
+    //for(size_t i=0; i<mtx_feeds.size(); i++) {
+    //    lcks.push_back(std::unique_lock<std::mutex>(mtx_feeds.at(i)));
+    //}
+
     // Get the largest width and height
     int max_width = -1;
     int max_height = -1;
@@ -47,6 +53,8 @@ void TrackBase::display_active(cv::Mat &img_out, int r1, int g1, int b1, int r2,
 
     // Loop through each image, and draw
     for(auto const& pair : img_last) {
+        // Lock this image
+        std::unique_lock<std::mutex> lck(mtx_feeds.at(pair.first));
         // select the subset of the image
         cv::Mat img_temp;
         if(image_new) cv::cvtColor(img_last[pair.first], img_temp, CV_GRAY2RGB);
@@ -74,6 +82,12 @@ void TrackBase::display_active(cv::Mat &img_out, int r1, int g1, int b1, int r2,
 
 void TrackBase::display_history(cv::Mat &img_out, int r1, int g1, int b1, int r2, int g2, int b2) {
 
+    // Lock all our feeds (this prevents other threads from editing our data)
+    //std::vector<std::unique_lock<std::mutex>> lcks;
+    //for(size_t i=0; i<mtx_feeds.size(); i++) {
+    //    lcks.push_back(std::unique_lock<std::mutex>(mtx_feeds.at(i)));
+    //}
+
     // Get the largest width and height
     int max_width = -1;
     int max_height = -1;
@@ -100,6 +114,8 @@ void TrackBase::display_history(cv::Mat &img_out, int r1, int g1, int b1, int r2
 
     // Loop through each image, and draw
     for(auto const& pair : img_last) {
+        // Lock this image
+        std::unique_lock<std::mutex> lck(mtx_feeds.at(pair.first));
         // select the subset of the image
         cv::Mat img_temp;
         if(image_new) cv::cvtColor(img_last[pair.first], img_temp, CV_GRAY2RGB);

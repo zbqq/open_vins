@@ -41,6 +41,8 @@ VioManager::VioManager(ros::NodeHandle &nh) {
     StateOptions state_options;
     nh.param<bool>("use_fej", state_options.do_fej, false);
     nh.param<bool>("use_imuavg", state_options.imu_avg, false);
+    nh.param<bool>("use_rk4int", state_options.use_rk4_integration, true);
+    nh.param<bool>("use_stereo", use_stereo, true);
     nh.param<bool>("calib_cam_extrinsics", state_options.do_calib_camera_pose, false);
     nh.param<bool>("calib_cam_intrinsics", state_options.do_calib_camera_intrinsics, false);
     nh.param<bool>("calib_cam_timeoffset", state_options.do_calib_camera_timeoffset, false);
@@ -63,11 +65,11 @@ VioManager::VioManager(ros::NodeHandle &nh) {
     std::transform(feat_rep_str.begin(), feat_rep_str.end(),feat_rep_str.begin(), ::toupper);
 
     // Set what representation we should be using
-    if(feat_rep_str == "GLOBAL_3D") state_options.feat_representation = StateOptions::FeatureRepresentation::GLOBAL_3D;
-    else if(feat_rep_str == "GLOBAL_FULL_INVERSE_DEPTH") state_options.feat_representation = StateOptions::FeatureRepresentation::GLOBAL_FULL_INVERSE_DEPTH;
-    else if(feat_rep_str == "ANCHORED_3D") state_options.feat_representation = StateOptions::FeatureRepresentation::ANCHORED_3D;
-    else if(feat_rep_str == "ANCHORED_FULL_INVERSE_DEPTH") state_options.feat_representation = StateOptions::FeatureRepresentation::ANCHORED_FULL_INVERSE_DEPTH;
-    else if(feat_rep_str == "ANCHORED_MSCKF_INVERSE_DEPTH") state_options.feat_representation = StateOptions::FeatureRepresentation::ANCHORED_MSCKF_INVERSE_DEPTH;
+    if(feat_rep_str == "GLOBAL_3D") state_options.feat_representation = FeatureRepresentation::Representation::GLOBAL_3D;
+    else if(feat_rep_str == "GLOBAL_FULL_INVERSE_DEPTH") state_options.feat_representation = FeatureRepresentation::Representation::GLOBAL_FULL_INVERSE_DEPTH;
+    else if(feat_rep_str == "ANCHORED_3D") state_options.feat_representation = FeatureRepresentation::Representation::ANCHORED_3D;
+    else if(feat_rep_str == "ANCHORED_FULL_INVERSE_DEPTH") state_options.feat_representation = FeatureRepresentation::Representation::ANCHORED_FULL_INVERSE_DEPTH;
+    else if(feat_rep_str == "ANCHORED_MSCKF_INVERSE_DEPTH") state_options.feat_representation = FeatureRepresentation::Representation::ANCHORED_MSCKF_INVERSE_DEPTH;
     else {
         ROS_ERROR("VioManager(): invalid feature representation specified = %s", feat_rep_str.c_str());
         ROS_ERROR("VioManager(): the valid types are:");
@@ -383,10 +385,22 @@ void VioManager::feed_measurement_stereo(double timestamp, cv::Mat& img0, cv::Ma
     // Start timing
     rT1 =  boost::posix_time::microsec_clock::local_time();
 
-    // Feed our trackers
-    trackFEATS->feed_stereo(timestamp, img0, img1, cam_id0, cam_id1);
+    // Assert we have good ids
+    assert(cam_id0!=cam_id1);
+
+    // Feed our stereo trackers, if we are not doing binocular
+    if(use_stereo) {
+        trackFEATS->feed_stereo(timestamp, img0, img1, cam_id0, cam_id1);
+    } else {
+        boost::thread t_l = boost::thread(&TrackBase::feed_monocular, trackFEATS, boost::ref(timestamp), boost::ref(img0), boost::ref(cam_id0));
+        boost::thread t_r = boost::thread(&TrackBase::feed_monocular, trackFEATS, boost::ref(timestamp), boost::ref(img1), boost::ref(cam_id1));
+        t_l.join();
+        t_r.join();
+    }
 
     // If aruoc is avalible, the also pass to it
+    // NOTE: binocular tracking for aruco doesn't make sense as we by default have the ids
+    // NOTE: thus we just call the stereo tracking if we are doing binocular!
     if(trackARUCO != nullptr) {
         trackARUCO->feed_stereo(timestamp, img0, img1, cam_id0, cam_id1);
     }
@@ -513,6 +527,12 @@ void VioManager::do_feature_propagate_update(double timestamp) {
         return;
     }
 
+    // Return if we where unable to propagate
+    if(state->timestamp() != timestamp) {
+        ROS_ERROR("[PROP]: Propagator unable to propagate the state forward in time!");
+        ROS_ERROR("[PROP]: It has been %.3f since last time we propagated",timestamp-state->timestamp());
+        return;
+    }
 
     //===================================================================================
     // MSCKF features and KLT tracks that are SLAM features
@@ -699,12 +719,12 @@ void VioManager::do_feature_propagate_update(double timestamp) {
     ROS_INFO("\u001b[34m[TIME]: %.4f seconds for propagation\u001b[0m",(rT3-rT2).total_microseconds() * 1e-6);
     ROS_INFO("\u001b[34m[TIME]: %.4f seconds for MSCKF update (%d features)\u001b[0m",(rT4-rT3).total_microseconds() * 1e-6, (int)good_features_MSCKF.size());
     if(state->options().max_slam_features > 0)
-        ROS_INFO("\u001b[34m[TIME]: %.4f seconds for SLAM update (%d delayed, %d update)\u001b[0m",(rT5-rT4).total_microseconds() * 1e-6, (int)feats_slam_UPDATE.size(), (int)feats_slam_DELAYED.size());
+        ROS_INFO("\u001b[34m[TIME]: %.4f seconds for SLAM update (%d delayed, %d update)\u001b[0m",(rT5-rT4).total_microseconds() * 1e-6, (int)feats_slam_DELAYED.size(), (int)feats_slam_UPDATE.size());
     ROS_INFO("\u001b[34m[TIME]: %.4f seconds for marginalization (%d clones in state)\u001b[0m",(rT6-rT5).total_microseconds() * 1e-6, (int)state->n_clones());
     ROS_INFO("\u001b[34m[TIME]: %.4f seconds for total\u001b[0m",(rT6-rT1).total_microseconds() * 1e-6);
 
     // Update our distance traveled
-    if(state->get_clones().find(timelastupdate) != state->get_clones().end()) {
+    if(timelastupdate != -1 && state->get_clones().find(timelastupdate) != state->get_clones().end()) {
         Eigen::Matrix<double,3,1> dx = state->imu()->pos() - state->get_clone(timelastupdate)->pos();
         distance += dx.norm();
     }
